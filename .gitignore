@@ -1,0 +1,72 @@
+# Node
+node_modules/
+**/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Vite / build outputs
+dist/
+build/
+
+# Logs
+logs/
+*.log
+coverage/
+coverage-html/
+
+# Runtime
+.pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Environment files
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# AWS credentials
+.aws/
+
+# Python
+venv/
+.venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+pip-wheel-metadata/
+.pytest_cache/
+htmlcov/
+
+# Byte-compiled / optimized
+*.pyc
+
+# Editor directories and files
+.vscode/
+.idea/
+*.sublime-workspace
+
+# Mac / Windows
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Repository user-specific
+.localhistory/
+
+# Misc
+*.swp
+*.swo
+*.bak
+*.tmp
+*.orig
+
+# npm package lock (keep if you want deterministic installs)
+# Uncomment to ignore lock files if desired
+# package-lock.json
