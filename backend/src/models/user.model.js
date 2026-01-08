@@ -12,9 +12,22 @@ const UserSchema = new mongoose.Schema(
       consented: { type: Boolean, default: false },
       timestamp: { type: Date },
     },
-    // Phase 2/3 placeholders (not used in Phase 1)
-    githubProfile: { type: String },
-    badges: { type: [String] },
+    // Phase 2.1: GitHub Integration
+    github: {
+      id: { type: String, sparse: true, unique: true },
+      username: { type: String },
+      accessToken: { type: String },
+      avatarUrl: { type: String },
+      lastSync: { type: Date },
+      metrics: {
+        commits: { type: Number, default: 0 },
+        mergedPRs: { type: Number, default: 0 },
+        stars: { type: Number, default: 0 },
+        originalRepos: { type: Number, default: 0 },
+      }
+    },
+    // Gamification Badges (Phase 2.2)
+    badges: { type: [String], default: [] },
   },
   { timestamps: true }
 )

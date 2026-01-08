@@ -77,6 +77,116 @@ app.post('/consent', verifyToken, requireOnboarded, async (req, res) => {
 const { generateUploadUrl } = require('./s3')
 const Resume = require('./models/resume.model')
 const Score = require('./models/score.model')
+const githubService = require('./services/github.service')
+const badgeService = require('./services/badge.service')
+const matchingService = require('./services/matching.service')
+const Connection = require('./models/connection.model')
+
+// GitHub OAuth entry
+app.get('/auth/github', (req, res) => {
+  const redirectUri = `${process.env.APP_URL || 'http://localhost:4000'}/auth/github/callback`
+  const url = `https://github.com/login/oauth/authorize?client_id=${process.env.GITHUB_CLIENT_ID}&redirect_uri=${redirectUri}&scope=read:user,repo`
+  res.redirect(url)
+})
+
+// GitHub OAuth callback
+app.get('/auth/github/callback', async (req, res) => {
+  try {
+    const { code } = req.query
+    if (!code) return res.status(400).json({ error: 'No code provided' })
+
+    const accessToken = await githubService.exchangeCodeForToken(code)
+    const profile = await githubService.getGitHubProfile(accessToken)
+
+    // 1. Try to find by GitHub ID
+    let user = await User.findOne({ 'github.id': String(profile.id) })
+
+    // 2. If not found, try to find by email (auto-link)
+    if (!user && profile.email) {
+      user = await User.findOne({ email: profile.email })
+      if (user) {
+        // Link existing user
+        user.github = {
+          id: String(profile.id),
+          username: profile.login,
+          accessToken: accessToken,
+          avatarUrl: profile.avatar_url,
+          metrics: user.github?.metrics || { commits: 0, mergedPRs: 0, stars: 0, originalRepos: 0 }
+        }
+        await user.save()
+      }
+    }
+
+    // 3. If still not found, create new (if domain valid? skipping domain check for now or applying strictly?)
+    // Applying strict domain check if configured, consistent with register
+    if (!user) {
+      const email = profile.email
+      if (!email) return res.status(400).json({ error: 'GitHub account has no public email' })
+
+      const domain = process.env.UNIVERSITY_DOMAIN
+      if (domain && !email.toLowerCase().endsWith(domain.toLowerCase())) {
+        return res.status(400).json({ error: `GitHub email must be a ${domain} address or link to an existing account` })
+      }
+
+      user = await User.create({
+        name: profile.name || profile.login,
+        email: email,
+        role: 'student',
+        github: {
+          id: String(profile.id),
+          username: profile.login,
+          accessToken: accessToken,
+          avatarUrl: profile.avatar_url,
+          metrics: { commits: 0, mergedPRs: 0, stars: 0, originalRepos: 0 }
+        }
+      })
+    } else {
+      // Update token if user existed
+      if (!user.github) user.github = {}
+      user.github.accessToken = accessToken
+      user.github.username = profile.login
+      user.github.avatarUrl = profile.avatar_url
+      // Ensure ID is set if retrieved by email
+      user.github.id = String(profile.id)
+      await user.save()
+    }
+
+    // Generate JWT
+    const token = generateToken(user)
+
+    // In a real app, we'd redirect to frontend with token in query or cookie
+    // For backend-only/PoC, returning JSON
+    return res.json({ token, user: { id: user._id, name: user.name, email: user.email, role: user.role, github: user.github.username } })
+
+  } catch (err) {
+    console.error('GitHub auth error:', err)
+    return res.status(500).json({ error: 'Authentication failed' })
+  }
+})
+
+// Manual Sync Endpoint
+app.post('/github/sync', verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id)
+    if (!user || !user.github || !user.github.accessToken) {
+      return res.status(400).json({ error: 'User not connected to GitHub' })
+    }
+
+    const stats = await githubService.fetchGitHubStats(user.github.accessToken, user.github.username)
+
+    user.github.metrics = stats
+    user.github.lastSync = new Date()
+    await user.save()
+
+    // Recalculate Score
+    const scoreDoc = await recalculateUserScore(user._id)
+
+    return res.json({ message: 'GitHub stats synced', metrics: stats, score: scoreDoc })
+  } catch (err) {
+    console.error('GitHub sync error:', err)
+    return res.status(500).json({ error: 'Sync failed' })
+  }
+})
 
 // Generate a pre-signed upload URL for a resume (PUT). Returns resume metadata record and upload URL.
 app.post('/resumes/upload-url', verifyToken, requireOnboarded, requireConsent, async (req, res) => {
@@ -130,7 +240,7 @@ app.post('/resumes/complete', verifyToken, requireOnboarded, requireConsent, asy
     if (size) resume.size = size
     resume.uploadedAt = new Date()
     await resume.save()
-    // Recalculate employability score for the user (Phase 1: GitHub=0, Badges=0)
+    // Recalculate employability score for the user
     try {
       await recalculateUserScore(req.user.id)
     } catch (err) {
@@ -174,23 +284,219 @@ app.post('/resumes/ats-result', async (req, res) => {
 })
 
 
+
+
+// --- Peer Discovery & Connections (Phase 2.3) ---
+
+// Search Peers
+app.get('/peers/search', verifyToken, async (req, res) => {
+  try {
+    const { skills, department, graduationYear, mode } = req.query
+    const requiredSkills = skills ? skills.split(',').map(s => s.trim()) : []
+
+    const results = await matchingService.findPeers(req.user.id, {
+      requiredSkills,
+      department,
+      graduationYear
+    }, mode)
+
+    return res.json({ count: results.length, peers: results })
+  } catch (err) {
+    console.error('Peer search error:', err)
+    return res.status(500).json({ error: 'Search failed' })
+  }
+})
+
+// Send Connection Request
+app.post('/connections', verifyToken, async (req, res) => {
+  try {
+    const { recipientId } = req.body
+    if (!recipientId) return res.status(400).json({ error: 'recipientId required' })
+    if (recipientId === req.user.id) return res.status(400).json({ error: 'Cannot connect with self' })
+
+    const existing = await Connection.findOne({
+      $or: [
+        { requester: req.user.id, recipient: recipientId },
+        { requester: recipientId, recipient: req.user.id }
+      ]
+    })
+
+    if (existing) {
+      return res.status(409).json({ error: 'Connection already exists/pending', status: existing.status })
+    }
+
+    const conn = await Connection.create({
+      requester: req.user.id,
+      recipient: recipientId,
+      status: 'pending'
+    })
+
+    return res.status(201).json({ message: 'Request sent', connectionId: conn._id })
+  } catch (err) {
+    console.error('Connection request error:', err)
+    return res.status(500).json({ error: 'Request failed' })
+  }
+})
+
+// List Connections
+app.get('/connections', verifyToken, async (req, res) => {
+  try {
+    const conns = await Connection.find({
+      $or: [{ requester: req.user.id }, { recipient: req.user.id }]
+    })
+      .populate('requester', 'name email department graduationYear badges')
+      .populate('recipient', 'name email department graduationYear badges')
+      .sort({ updatedAt: -1 })
+
+    const view = conns.map(c => {
+      const isRequester = c.requester._id.toString() === req.user.id
+      const other = isRequester ? c.recipient : c.requester
+
+      let otherData = {}
+      if (c.status === 'accepted') {
+        otherData = {
+          id: other._id,
+          name: other.name,
+          email: other.email,
+          department: other.department,
+          graduationYear: other.graduationYear,
+          badges: other.badges
+        }
+      } else {
+        // Mask Pending
+        otherData = {
+          id: other._id,
+          maskedIdentity: `User #${String(other._id).slice(-4)}`,
+          department: other.department
+        }
+      }
+
+      return {
+        connectionId: c._id,
+        status: c.status,
+        direction: isRequester ? 'outgoing' : 'incoming',
+        peer: otherData,
+        updatedAt: c.updatedAt
+      }
+    })
+
+    return res.json({ connections: view })
+  } catch (err) {
+    console.error('List connections error:', err)
+    return res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// Respond to Request
+app.put('/connections/:id', verifyToken, async (req, res) => {
+  try {
+    const { status } = req.body
+    if (!['accepted', 'rejected'].includes(status)) return res.status(400).json({ error: 'Invalid status' })
+
+    const conn = await Connection.findOne({
+      _id: req.params.id,
+      recipient: req.user.id
+    })
+
+    if (!conn) return res.status(404).json({ error: 'Request not found' })
+    if (conn.status !== 'pending') return res.status(400).json({ error: 'Connection already processed' })
+
+    conn.status = status
+    await conn.save()
+
+    return res.json({ message: `Connection ${status}`, connectionId: conn._id })
+  } catch (err) {
+    console.error('Respond connection error:', err)
+    return res.status(500).json({ error: 'Server error' })
+  }
+})
+
+
+const visualizationService = require('./services/visualization.service')
+const { roles } = require('./data/roles')
+
+// --- Visualization & Analytics (Phase 2.4) ---
+
+// Get Available Target Roles
+app.get('/vis/roles', verifyToken, (req, res) => {
+  return res.json({ roles: roles.map(r => ({ id: r.id, label: r.label, description: r.description })) })
+})
+
+// Get Gap Analysis Result
+// Query: roleId (required), peerId (optional - must be a connection?)
+app.get('/vis/gap', verifyToken, async (req, res) => {
+  try {
+    const { roleId, peerId } = req.query
+    if (!roleId) return res.status(400).json({ error: 'roleId is required' })
+
+    // If peerId provided, verify connection?
+    // Privacy: You can only compare with connections or maybe anonymized peers?
+    // Prompt says "Compute user vs peer skill overlap". 
+    // Let's enforce that if peerId is given, they must be connected OR it's a specific "Compare" action allowing it.
+    // Assuming strict: must be connected.
+    if (peerId) {
+      const Conn = require('./models/connection.model') // Late require to avoid circ dep issues top-level if any
+      const isConnected = await Conn.findOne({
+        $or: [
+          { requester: req.user.id, recipient: peerId, status: 'accepted' },
+          { requester: peerId, recipient: req.user.id, status: 'accepted' }
+        ]
+      })
+      if (!isConnected) return res.status(403).json({ error: 'Not connected to this peer' })
+    }
+
+    const data = await visualizationService.getGapAnalysis(req.user.id, roleId, peerId)
+    return res.json({ roleId, data })
+  } catch (err) {
+    console.error('Vis gap error:', err)
+    return res.status(500).json({ error: err.message || 'Server error' })
+  }
+})
+
 async function recalculateUserScore(userId) {
-  // Phase 1: GitHub score = 0, Badge score = 0
-  // Use the most recently scored resume for atsComponent (if any)
-  const latest = await Resume.findOne({ user: userId, status: 'scored' }).sort({ uploadedAt: -1, updatedAt: -1 })
+  // Phase 1: ATS (50%)
+  // Phase 2: GitHub (30%)
+  // Phase 2.2: Badges (20%)
+
+  const user = await User.findById(userId)
+  if (!user) return null
+
+  // 1. Get ATS Score
+  const latestResume = await Resume.findOne({ user: userId, status: 'scored' }).sort({ uploadedAt: -1, updatedAt: -1 })
   let atsComponent = 0
-  if (latest && typeof latest.atsScore === 'number') {
-    atsComponent = latest.atsScore
+  if (latestResume && typeof latestResume.atsScore === 'number') {
+    atsComponent = latestResume.atsScore
   }
 
-  const gitComponent = 0
-  const badgeComponent = 0
+  // 2. Get GitHub Score
+  let gitComponent = 0
+  if (user.github && user.github.metrics) {
+    gitComponent = githubService.calculateGitHubScore(user.github.metrics)
+  }
 
+  // 3. Evaluate Badges
+  const badgeResult = badgeService.evaluateBadges(user, latestResume)
+  const badgeComponent = badgeResult.score
+
+  // Persist unlocked badges
+  if (badgeResult.badges.length > 0) {
+    user.badges = badgeResult.badges
+    await user.save()
+  }
+
+  // 4. Weighted Sum
+  // ATS: 50% (0.5), Git: 30% (0.3), Badge: 20% (0.2)
   const totalScore = Number((0.5 * atsComponent + 0.3 * gitComponent + 0.2 * badgeComponent).toFixed(2))
 
   let scoreDoc = await Score.findOne({ user: userId })
   if (!scoreDoc) {
-    scoreDoc = await Score.create({ user: userId, totalScore, atsComponent, gitComponent, badgeComponent })
+    scoreDoc = await Score.create({
+      user: userId,
+      totalScore,
+      atsComponent,
+      gitComponent,
+      badgeComponent
+    })
   } else {
     scoreDoc.totalScore = totalScore
     scoreDoc.atsComponent = atsComponent

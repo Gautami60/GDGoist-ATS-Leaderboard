@@ -5,7 +5,10 @@ const ScoreSchema = new mongoose.Schema(
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     totalScore: { type: Number, default: 0 },
     atsComponent: { type: Number, default: 0 },
-    // Breakdown includes placeholders for future components (not used in Phase 1)
+    gitComponent: { type: Number, default: 0 },
+    badgeComponent: { type: Number, default: 0 },
+
+    // Breakdown detail (optional/redundant but kept for structure)
     breakdown: {
       atsComponent: { type: Number, default: 0 },
       gitComponent: { type: Number, default: 0 },
