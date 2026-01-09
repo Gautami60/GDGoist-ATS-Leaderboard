@@ -1,125 +1,122 @@
-# GDGoist ATS Leaderboard — Phase 1
+# GDGoist ATS Leaderboard
 
-This repository contains a Phase‑1 scaffold for an ATS leaderboard platform.
+A privacy-first employability assessment platform designed for internal university use. It provides students with explainable ATS scoring, skill gap analysis, and gamified leaderboards to improve job readiness.
 
-Structure
-- `frontend/` — React + Vite + Tailwind (UI only)
-- `backend/` — Node.js + Express BFF: auth, onboarding, consent, S3 presigned uploads, score persistence, leaderboard & admin APIs
-- `ats-service/` — Python + FastAPI: resume parsing & scoring (PDF/DOCX)
+**Note:** This is purely an internal tool, not a public job portal/recruiter platform. It adheres strictly to DPDP privacy principles.
 
-Phase 1 constraints
-- No GitHub integration, badges, peer networking, or Redis caching.
-- Node.js does not parse resumes — parsing/scoring lives in `ats-service`.
+---
 
-Prerequisites
-- Node 16+ and npm
-- Python 3.8+ and `pip`
-- MongoDB Atlas (URI)
-- AWS S3 bucket (private) and IAM credentials with `s3:PutObject`
+## Tech Stack
 
-Environment variables
-Create `.env` files in `backend/` (copy `.env.example`) and set these values:
+-   **Frontend**: React + Tailwind CSS (Currently minimal scaffolding)
+-   **Backend**: Node.js + Express (BFF pattern)
+-   **ATS Service**: Python + FastAPI (Parsing & Scoring)
+-   **Database**: MongoDB (Local or Atlas)
+-   **Storage**: AWS S3 (Optional for local testing)
+-   **Auth**: JWT (Stateless)
+-   **Testing**: TestSprite (API-level automation)
 
-- `MONGODB_URI` — MongoDB Atlas connection string
-- `JWT_SECRET` — JWT signing secret
-- `UNIVERSITY_DOMAIN` (optional) — e.g. `@uni.edu` to restrict registrations
-- `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `S3_BUCKET`
+---
 
-Quick start — Backend
+## Local Development Setup
 
-1. Install deps and run (PowerShell):
+### Prerequisites
 
-```powershell
+-   **Node.js**: v18+
+-   **npm**: v9+
+-   **Python**: v3.10+
+-   **pip**
+-   **MongoDB**: Local instance or Atlas connection string
+-   **Git**
+
+### Clone & Install
+
+```bash
+# 1. Clone
+git clone https://github.com/your-org/GDGoist-ATS-Leaderboard.git
+cd GDGoist-ATS-Leaderboard
+
+# 2. Install Backend Connection
 cd backend
 npm install
-# create .env from .env.example and populate values
-npm run dev
+# (Keep this terminal open for configuration)
+
+# 3. Install ATS Service Dependencies (New Terminal)
+cd ../ats-service
+python -m venv venv
+# Windows: venv\Scripts\activate
+# Mac/Linux: source venv/bin/activate
+pip install -r requirements.txt
 ```
 
-2. Health: `GET http://localhost:4000/health`
+---
 
-Quick start — ATS Service
+## Environment Variables
 
-```powershell
-cd ats-service
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
+Create a `.env` file in the `backend/` directory with the following variables.
+
+### Core (Required)
+```ini
+PORT=4000
+MONGODB_URI=mongodb+srv://<user>:<pass>@cluster.mongodb.net/app_db
+JWT_SECRET=your_secure_random_string
+```
+
+### GitHub Integration (Phase 2 - Optional)
+Required only if you want to test GitHub OAuth linkage and scoring.
+```ini
+GITHUB_CLIENT_ID=your_github_client_id
+GITHUB_CLIENT_SECRET=your_github_client_secret
+# Callback configured in GitHub App: http://localhost:4000/auth/github/callback
+```
+
+### AWS S3 (Optional for Local Testing)
+Required only for file upload endpoints. If omitted, uploads will fail but other features work.
+```ini
+AWS_ACCESS_KEY_ID=your_aws_key
+AWS_SECRET_ACCESS_KEY=your_aws_secret
+AWS_REGION=us-east-1
+S3_BUCKET=your_private_bucket
+```
+
+---
+
+## Running the Project Locally
+
+You need two separate terminals running simultaneously.
+
+### 1. Start Backend
+In `backend/`:
+```bash
+npm run dev
+```
+-   **Port**: 4000
+-   **Health Check**: `http://localhost:4000/health`
+
+### 2. Start ATS Service
+In `ats-service/` (venv activated):
+```bash
 uvicorn main:app --reload --port 8000
 ```
+-   **Port**: 8000
+-   **Health Check**: `http://localhost:8000/health`
 
-Health: `GET http://localhost:8000/health`
+**Note**: The Frontend is currently minimal and not required for API/Backend testing.
 
-Quick start — Frontend (optional)
+---
 
-```powershell
-cd frontend
-npm install
-npm run dev
-```
+## Running Tests
 
-Smoke test flow (minimal)
+Automated API tests are configured using **TestSprite MCP**.
+-   Ensure Backend is running on port 4000.
+-   Run tests via VS Code TestSprite extension or execute manually via curl/Postman.
+-   Tests cover: Registration, Onboarding, Upload, and Scoring flows.
 
-1) Register & login → get JWT token
+---
 
-```bash
-curl -X POST http://localhost:4000/auth/register -H "Content-Type: application/json" -d '{"name":"Alice","email":"alice@uni.edu","password":"Password123"}'
-curl -X POST http://localhost:4000/auth/login -H "Content-Type: application/json" -d '{"email":"alice@uni.edu","password":"Password123"}'
-# Save token from login response as TOKEN
-```
+## Current Status
 
-2) Onboard (required before protected APIs):
-
-```bash
-curl -X POST http://localhost:4000/onboarding -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"department":"Computer Science","graduationYear":2026}'
-```
-
-3) Give DPDP consent (required before upload):
-
-```bash
-curl -X POST http://localhost:4000/consent -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"consented": true}'
-```
-
-4) Request presigned upload URL (backend):
-
-```bash
-curl -X POST http://localhost:4000/resumes/upload-url -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"filename":"resume.pdf","contentType":"application/pdf","size":12345}'
-# Response includes uploadUrl, fileKey, resumeId
-```
-
-5) Upload file directly to S3 using the returned `uploadUrl` (PUT). Example (PowerShell):
-
-```powershell
-Invoke-RestMethod -Uri "<uploadUrl>" -Method PUT -InFile "resume.pdf" -ContentType "application/pdf"
-```
-
-6) Notify backend upload complete:
-
-```bash
-curl -X POST http://localhost:4000/resumes/complete -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"resumeId":"<resumeId>","size":12345}'
-```
-
-7) Parse & score with ATS (local test):
-
-```bash
-curl -X POST "http://localhost:8000/parse" -F "file=@resume.pdf" -F "job_description=Sample job text"
-# ATS returns atsScore, parsedSkills, parsingErrors, feedback
-```
-
-8) Simulate ATS callback (ingest result into backend):
-
-```bash
-curl -X POST http://localhost:4000/resumes/ats-result -H "Content-Type: application/json" -d '{"resumeId":"<resumeId>","atsScore":82.5,"parsedSkills":["python","sql"],"parsingErrors":[]} '
-```
-
-9) Check leaderboard (anonymous):
-
-```bash
-curl "http://localhost:4000/leaderboard?department=Computer%20Science&graduationYear=2026"
-```
-
-Admin endpoints
-
-- `GET /admin/stats/departments` — department-wise distribution (no PII)
-- `GET /admin/stats/years` — year-wise aggregates (no PII)
-- `GET /admin/export/anonymized.csv` — anonymized CSV export (hashed anon_id, no PII)
+-   **Phase 1 (Completed)**: Auth, Onboarding, Resume Parsing (Heuristic + TF-IDF), Leaderboards.
+-   **Phase 2 (Implemented)**: GitHub OAuth Data Model, Badges Logic, Peer Discovery (Jaccard), Skill Gap Radar Charts.
+-   **Frontend**: Minimal prototype.
+-   **Deployment**: Not deployed (Localhost only).
