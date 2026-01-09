@@ -1,4 +1,4 @@
-const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3')
+const { S3Client, PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3')
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner')
 
 const region = process.env.AWS_REGION
@@ -17,4 +17,20 @@ async function generateUploadUrl(key, contentType, expiresIn = 900) {
   return url
 }
 
-module.exports = { generateUploadUrl }
+async function downloadFile(key) {
+  if (!bucket) throw new Error('S3_BUCKET not configured')
+  const command = new GetObjectCommand({
+    Bucket: bucket,
+    Key: key
+  })
+  const response = await s3.send(command)
+
+  // Convert stream to buffer
+  const chunks = []
+  for await (const chunk of response.Body) {
+    chunks.push(chunk)
+  }
+  return Buffer.concat(chunks)
+}
+
+module.exports = { generateUploadUrl, downloadFile }

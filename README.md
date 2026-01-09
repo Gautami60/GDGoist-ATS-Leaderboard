@@ -1,122 +1,187 @@
-# GDGoist ATS Leaderboard
+#GDGoist ATS Leaderboard 🚀#
 
-A privacy-first employability assessment platform designed for internal university use. It provides students with explainable ATS scoring, skill gap analysis, and gamified leaderboards to improve job readiness.
+GDGoist ATS Leaderboard is a university-level, product-oriented web application that evaluates student resumes using an Applicant Tracking System (ATS), computes employability insights, and presents results through a centralized leaderboard.
 
-**Note:** This is purely an internal tool, not a public job portal/recruiter platform. It adheres strictly to DPDP privacy principles.
+The project is designed to demonstrate real-world system design, service-based architecture, and end-to-end integration of frontend, backend, cloud storage, and AI-assisted resume parsing.
 
----
+✨ Key Highlights
 
-## Tech Stack
+End-to-end resume upload and ATS analysis
 
--   **Frontend**: React + Tailwind CSS (Currently minimal scaffolding)
--   **Backend**: Node.js + Express (BFF pattern)
--   **ATS Service**: Python + FastAPI (Parsing & Scoring)
--   **Database**: MongoDB (Local or Atlas)
--   **Storage**: AWS S3 (Optional for local testing)
--   **Auth**: JWT (Stateless)
--   **Testing**: TestSprite (API-level automation)
+Scalable service-based architecture
 
----
+Secure file handling using AWS S3 presigned URLs
 
-## Local Development Setup
+Clean, minimal frontend suitable for academic deployment
 
-### Prerequisites
+Built with extensibility in mind (future scoring & analytics)
 
--   **Node.js**: v18+
--   **npm**: v9+
--   **Python**: v3.10+
--   **pip**
--   **MongoDB**: Local instance or Atlas connection string
--   **Git**
+🏗️ Architecture Overview
 
-### Clone & Install
+Frontend: React + Vite
 
-```bash
-# 1. Clone
-git clone https://github.com/your-org/GDGoist-ATS-Leaderboard.git
-cd GDGoist-ATS-Leaderboard
+Backend: Node.js + Express
 
-# 2. Install Backend Connection
+ATS Service: Python + FastAPI
+
+Database: MongoDB
+
+Storage: AWS S3 (direct uploads via presigned URLs)
+
+Each service is independently runnable and loosely coupled, mirroring production-grade systems.
+
+📌 Phase-wise Feature Status
+✅ Phase 1 — Core Foundation (Completed)
+
+User authentication (register & login)
+
+Role-based access (student / admin)
+
+Student onboarding (department & graduation year)
+
+Privacy & consent handling
+
+Resume upload via AWS S3
+
+ATS service trigger & resume parsing
+
+Student dashboard (basic)
+
+Leaderboard APIs with filtering
+
+⚠️ Phase 2 — Scoring & Insights (Partially Implemented)
+
+ATS score computation
+
+Resume parsing pipeline
+
+ATS score persistence (in progress)
+
+Employability score (partially wired)
+
+Dashboard score visualization (in progress)
+
+Pagination & filtering (API-level)
+
+🚧 Phase 3 — Advanced Features (Coming Soon)
+
+GitHub profile analysis & GitHub score
+
+Badge system
+
+Composite employability scoring
+
+Admin analytics dashboard
+
+Historical score tracking
+
+Recommendation & insight engine
+
+📁 Repository Structure
+GDGoist-ATS-Leaderboard/
+├── backend/        # Node.js + Express API
+├── ats-service/    # Python FastAPI ATS engine
+├── frontend/       # React + Vite frontend
+└── README.md       # Project documentation
+
+⚙️ Local Setup & Running the Project
+Prerequisites
+
+Node.js (v18+ recommended)
+
+Python (v3.10+ recommended)
+
+MongoDB (local or Atlas)
+
+AWS account with:
+
+S3 bucket
+
+IAM user & access keys
+
+1️⃣ Run ATS Service (Python)
+cd ats-service
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+pip install python-multipart
+uvicorn main:app --reload --port 8000
+
+
+ATS service runs at:
+
+http://127.0.0.1:8000
+
+2️⃣ Run Backend (Node.js)
 cd backend
 npm install
-# (Keep this terminal open for configuration)
-
-# 3. Install ATS Service Dependencies (New Terminal)
-cd ../ats-service
-python -m venv venv
-# Windows: venv\Scripts\activate
-# Mac/Linux: source venv/bin/activate
-pip install -r requirements.txt
-```
-
----
-
-## Environment Variables
-
-Create a `.env` file in the `backend/` directory with the following variables.
-
-### Core (Required)
-```ini
-PORT=4000
-MONGODB_URI=mongodb+srv://<user>:<pass>@cluster.mongodb.net/app_db
-JWT_SECRET=your_secure_random_string
-```
-
-### GitHub Integration (Phase 2 - Optional)
-Required only if you want to test GitHub OAuth linkage and scoring.
-```ini
-GITHUB_CLIENT_ID=your_github_client_id
-GITHUB_CLIENT_SECRET=your_github_client_secret
-# Callback configured in GitHub App: http://localhost:4000/auth/github/callback
-```
-
-### AWS S3 (Optional for Local Testing)
-Required only for file upload endpoints. If omitted, uploads will fail but other features work.
-```ini
-AWS_ACCESS_KEY_ID=your_aws_key
-AWS_SECRET_ACCESS_KEY=your_aws_secret
-AWS_REGION=us-east-1
-S3_BUCKET=your_private_bucket
-```
-
----
-
-## Running the Project Locally
-
-You need two separate terminals running simultaneously.
-
-### 1. Start Backend
-In `backend/`:
-```bash
 npm run dev
-```
--   **Port**: 4000
--   **Health Check**: `http://localhost:4000/health`
 
-### 2. Start ATS Service
-In `ats-service/` (venv activated):
-```bash
-uvicorn main:app --reload --port 8000
-```
--   **Port**: 8000
--   **Health Check**: `http://localhost:8000/health`
 
-**Note**: The Frontend is currently minimal and not required for API/Backend testing.
+Backend runs at:
 
----
+http://localhost:5000
 
-## Running Tests
 
-Automated API tests are configured using **TestSprite MCP**.
--   Ensure Backend is running on port 4000.
--   Run tests via VS Code TestSprite extension or execute manually via curl/Postman.
--   Tests cover: Registration, Onboarding, Upload, and Scoring flows.
+Ensure .env includes:
 
----
+MongoDB connection URI
 
-## Current Status
+AWS credentials
 
--   **Phase 1 (Completed)**: Auth, Onboarding, Resume Parsing (Heuristic + TF-IDF), Leaderboards.
--   **Phase 2 (Implemented)**: GitHub OAuth Data Model, Badges Logic, Peer Discovery (Jaccard), Skill Gap Radar Charts.
--   **Frontend**: Minimal prototype.
--   **Deployment**: Not deployed (Localhost only).
+S3 bucket name
+
+ATS service URL (http://localhost:8000)
+
+3️⃣ Run Frontend (React)
+cd frontend
+npm install
+npm run dev
+
+
+Frontend runs at:
+
+http://localhost:3000
+
+🔄 Typical Local Workflow
+
+Start ATS service
+
+Start backend server
+
+Start frontend
+
+Register / login as a student
+
+Complete onboarding & consent
+
+Upload resume
+
+ATS processes resume asynchronously
+
+Scores appear on dashboard once processing completes
+
+🧠 Notes & Design Decisions
+
+Resume files are uploaded directly to S3, not through backend
+
+ATS processing is asynchronous by design
+
+Phase 2 & 3 scope is intentionally separated
+
+Frontend is kept minimal, clean, and academic-friendly
+
+📊 Project Status
+
+✔ Infrastructure & integrations complete
+
+✔ Resume upload & ATS parsing functional
+
+⚠ Score propagation & visualization under refinement
+
+🚧 Advanced intelligence features planned
+
+📜 License
+
+This project is intended for educational and academic use.
+Feel free to fork, study, and adapt with attribution.

@@ -1,5 +1,6 @@
 require('dotenv').config()
 const express = require('express')
+const cors = require('cors')
 const { connect } = require('./db')
 const app = express()
 const bcrypt = require('bcryptjs')
@@ -10,6 +11,7 @@ const { requireConsent } = require('./middleware/consent')
 
 connect()
 
+app.use(cors())
 app.use(express.json())
 
 app.get('/health', (req, res) => {
@@ -240,6 +242,57 @@ app.post('/resumes/complete', verifyToken, requireOnboarded, requireConsent, asy
     if (size) resume.size = size
     resume.uploadedAt = new Date()
     await resume.save()
+
+    // Trigger ATS service to parse and score the resume
+    const atsServiceUrl = process.env.ATS_SERVICE_URL || 'http://localhost:8000'
+    try {
+      console.log(`Triggering ATS service for resume ${resumeId}...`)
+      const axios = require('axios')
+      const FormData = require('form-data')
+      const { downloadFile } = require('./s3')
+
+      // Download resume file from S3
+      console.log(`Downloading resume from S3: ${resume.fileKey}`)
+      const fileBuffer = await downloadFile(resume.fileKey)
+      console.log(`Downloaded ${fileBuffer.length} bytes`)
+
+      // Create form data
+      const formData = new FormData()
+      formData.append('file', fileBuffer, {
+        filename: resume.originalFilename,
+        contentType: resume.contentType
+      })
+
+      // Send to ATS service
+      const atsResponse = await axios.post(`${atsServiceUrl}/parse`, formData, {
+        headers: formData.getHeaders(),
+        timeout: 60000, // 60 second timeout
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity
+      })
+
+      console.log(`ATS service responded with score: ${atsResponse.data.atsScore}`)
+
+      // Update resume with ATS results
+      resume.atsScore = atsResponse.data.atsScore
+      if (atsResponse.data.parsedSkills) {
+        resume.parsedSkills = atsResponse.data.parsedSkills
+      }
+      if (atsResponse.data.parsingErrors) {
+        resume.parsingErrors = atsResponse.data.parsingErrors
+      }
+      resume.status = 'scored'
+      await resume.save()
+
+      console.log(`ATS service completed successfully for resume ${resumeId}`)
+    } catch (atsErr) {
+      console.error('Failed to trigger ATS service:', atsErr.message)
+      if (atsErr.response) {
+        console.error('ATS service response:', atsErr.response.status, atsErr.response.data)
+      }
+      // Don't fail the request - ATS processing can happen async
+    }
+
     // Recalculate employability score for the user
     try {
       await recalculateUserScore(req.user.id)
@@ -716,7 +769,33 @@ app.get('/me', verifyToken, async (req, res) => {
     const user = await User.findById(req.user.id).select('-passwordHash')
     if (!user) return res.status(404).json({ error: 'User not found' })
     const onboardingRequired = !(user.department && user.graduationYear)
-    return res.json({ user, onboardingRequired })
+
+    // Fetch user's score
+    const scoreDoc = await Score.findOne({ user: req.user.id })
+    const score = scoreDoc ? {
+      totalScore: scoreDoc.totalScore || 0,
+      atsComponent: scoreDoc.atsComponent || 0,
+      gitComponent: scoreDoc.gitComponent || 0,
+      badgeComponent: scoreDoc.badgeComponent || 0
+    } : {
+      totalScore: 0,
+      atsComponent: 0,
+      gitComponent: 0,
+      badgeComponent: 0
+    }
+
+    // Fetch latest resume status
+    const latestResume = await Resume.findOne({ user: req.user.id }).sort({ uploadedAt: -1 })
+    const resumeStatus = latestResume ? {
+      hasResume: true,
+      status: latestResume.status,
+      uploadedAt: latestResume.uploadedAt,
+      atsScore: latestResume.atsScore || 0
+    } : {
+      hasResume: false
+    }
+
+    return res.json({ user, onboardingRequired, score, resumeStatus })
   } catch (err) {
     console.error(err)
     return res.status(500).json({ error: 'Server error' })
